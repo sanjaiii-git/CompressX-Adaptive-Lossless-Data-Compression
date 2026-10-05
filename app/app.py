@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import time
+import textwrap
 from typing import Any, Dict, List, Optional
 
 import matplotlib
@@ -26,6 +27,10 @@ import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def render_html(html_str: str) -> None:
+    """Render raw HTML safely by stripping indentation so Markdown does not parse 4+ spaces as a code block."""
+    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
 
 from analysis.entropy import calculate_entropy, theoretical_compression_limit
 from analysis.predictor import CompressionPredictor, CostWeights
@@ -988,7 +993,10 @@ if current_page == "compress":
                 space_title = "Size Expansion"
                 space_caption = "Container metadata on incompressible data"
 
-            st.markdown(f"""
+            pct_fill = max(int((j["compressed_size"] / max(j["original_size"], 1)) * 100), 1)
+            fill_color = "#16a34a" if pct_fill < 70 else ("#ea580c" if pct_fill < 100 else "#dc2626")
+
+            render_html(f"""
             <div class="result-section">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                     <span style="font-size:0.85rem; font-weight:700; color:#15803d;">
@@ -1030,11 +1038,7 @@ if current_page == "compress":
                         <div class="bar-fill bar-orig"></div>
                     </div>
                 </div>
-            """, unsafe_allow_html=True)
 
-            pct_fill = max(int((j["compressed_size"] / max(j["original_size"], 1)) * 100), 1)
-            fill_color = "#16a34a" if pct_fill < 70 else ("#ea580c" if pct_fill < 100 else "#dc2626")
-            st.markdown(f"""
                 <div class="bar-container">
                     <div class="bar-label">
                         <span>Compressed AHDC Archive</span>
@@ -1045,7 +1049,7 @@ if current_page == "compress":
                     </div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
             # Lossless Integrity Verification
             if j["integrity_verified"]:

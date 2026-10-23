@@ -11,15 +11,23 @@ Clean, enterprise-grade SaaS interface:
 - Full-width algorithm comparison table and download center
 """
 
+import os
+import sys
+from pathlib import Path
+
+# Ensure project root is prioritized at the top of sys.path for Streamlit Cloud and local runs
+ROOT_DIR = Path(__file__).resolve().parent.parent
+root_str = str(ROOT_DIR)
+if root_str in sys.path:
+    sys.path.remove(root_str)
+sys.path.insert(0, root_str)
+
 import hashlib
 import io
 import json
-import os
-import sys
 import time
 import textwrap
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -27,25 +35,25 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-# Ensure project root is prioritized in sys.path for Streamlit Cloud and local runs
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 def render_html(html_str: str) -> None:
     """Render raw HTML safely by stripping indentation so Markdown does not parse 4+ spaces as a code block."""
     st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
 
-from analysis.entropy import calculate_entropy, theoretical_compression_limit
-from analysis.predictor import CompressionPredictor, CostWeights
-from analysis.repetition import analyze_repetition
-from analysis.statistics import calculate_statistics
-from compression.adaptive import AdaptiveCompressor
-from datasets.generate_datasets import DATASET_DIR, generate_all_datasets
-from evaluation.benchmark import BenchmarkRunner
-from evaluation.report_generator import generate_pdf_report
-from storage.container import Container
-from storage.history import add_history_entry, clear_history, load_history
+try:
+    from analysis.entropy import calculate_entropy, theoretical_compression_limit
+    from analysis.predictor import CompressionPredictor, CostWeights
+    from analysis.repetition import analyze_repetition
+    from analysis.statistics import calculate_statistics
+    from compression.adaptive import AdaptiveCompressor
+    from datasets.generate_datasets import DATASET_DIR, generate_all_datasets
+    from evaluation.benchmark import BenchmarkRunner
+    from evaluation.report_generator import generate_pdf_report
+    from storage.container import Container
+    from storage.history import add_history_entry, clear_history, load_history
+except ModuleNotFoundError as import_err:
+    import traceback
+    st.error(f"Module import error: {import_err}\n\nsys.path:\n{sys.path}\n\nTraceback:\n{traceback.format_exc()}")
+    raise import_err
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIGURATION

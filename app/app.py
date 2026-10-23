@@ -1053,6 +1053,8 @@ if current_page == "compress":
                 "selection_objective": active_objective,
                 "selection_rationale": details["selection_rationale"],
                 "original_size": details["original_size"],
+                "payload_size": details.get("payload_size", 0),
+                "overhead_size": details.get("overhead_size", max(0, details["container_size"] - details.get("payload_size", 0))),
                 "compressed_size": details["container_size"],
                 "compression_ratio": details["compression_ratio"],
                 "space_saving_pct": details["space_saving_pct"],
@@ -1096,11 +1098,15 @@ if current_page == "compress":
             if sp_val >= 0:
                 space_display = f"{sp_val:.1f}%"
                 space_title = "Space Saved"
-                space_caption = "Storage reduced"
+                space_caption = f"Ratio: {j['compression_ratio']:.2f}x"
             else:
                 space_display = f"+{abs(sp_val):.1f}%"
                 space_title = "Size Expansion"
                 space_caption = "Container metadata on incompressible data"
+
+            payload_val = j.get("payload_size", 0)
+            overhead_val = j.get("overhead_size", max(0, j["compressed_size"] - payload_val))
+            itg_status_text = "PASS (100% Exact)" if j.get("integrity_verified") else "FAIL (Mismatch)"
 
             pct_fill = max(int((j["compressed_size"] / max(j["original_size"], 1)) * 100), 1)
             fill_color = "#16a34a" if pct_fill < 70 else ("#ea580c" if pct_fill < 100 else "#dc2626")
@@ -1109,7 +1115,7 @@ if current_page == "compress":
             <div class="result-section">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                     <span style="font-size:0.85rem; font-weight:700; color:#15803d;">
-                        PIPELINE COMPLETED &nbsp;·&nbsp; STRATEGY: {j['selected_strategy']}
+                        PIPELINE COMPLETED &nbsp;·&nbsp; STRATEGY: {j['selected_strategy']} ({j.get('selection_objective', 'balanced').upper()})
                     </span>
                     <span style="font-size:0.75rem; color:#64748b; font-family:monospace;">
                         AHDC-v1 CONTAINER
@@ -1122,19 +1128,41 @@ if current_page == "compress":
                         <p class="rmc-sub">{j['original_size']:,} bytes</p>
                     </div>
                     <div class="result-mini-card">
-                        <p class="rmc-label">Compressed Container</p>
+                        <p class="rmc-label">Final Stored Size</p>
                         <p class="rmc-value">{fmt_bytes(j['compressed_size'])}</p>
                         <p class="rmc-sub">{j['compressed_size']:,} bytes</p>
                     </div>
                     <div class="result-mini-card">
                         <p class="rmc-label">Compression Ratio</p>
                         <p class="rmc-value">{j['compression_ratio']:.2f}x</p>
-                        <p class="rmc-sub">Original ÷ Compressed</p>
+                        <p class="rmc-sub">Original ÷ Final Stored</p>
                     </div>
                     <div class="result-mini-card">
                         <p class="rmc-label">{space_title}</p>
                         <p class="rmc-value">{space_display}</p>
                         <p class="rmc-sub">{space_caption}</p>
+                    </div>
+                </div>
+                <div class="result-grid-4" style="margin-top:10px;">
+                    <div class="result-mini-card">
+                        <p class="rmc-label">Compressed Payload</p>
+                        <p class="rmc-value">{fmt_bytes(payload_val)}</p>
+                        <p class="rmc-sub">{payload_val:,} bytes</p>
+                    </div>
+                    <div class="result-mini-card">
+                        <p class="rmc-label">Container Overhead</p>
+                        <p class="rmc-value">{fmt_bytes(overhead_val)}</p>
+                        <p class="rmc-sub">Header & JSON metadata</p>
+                    </div>
+                    <div class="result-mini-card">
+                        <p class="rmc-label">Encoding Time</p>
+                        <p class="rmc-value">{j['encoding_time']:.5f}s</p>
+                        <p class="rmc-sub">{fmt_bytes(j['throughput_bps'])}/s throughput</p>
+                    </div>
+                    <div class="result-mini-card">
+                        <p class="rmc-label">Integrity Status</p>
+                        <p class="rmc-value" style="color:#15803d;">{itg_status_text}</p>
+                        <p class="rmc-sub">SHA-256 match</p>
                     </div>
                 </div>
 

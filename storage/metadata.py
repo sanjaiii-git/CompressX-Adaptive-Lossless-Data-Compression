@@ -16,8 +16,20 @@ class Metadata:
     extra_attributes: Dict[str, Any] = field(default_factory=dict)
 
     def to_json_bytes(self) -> bytes:
-        """Serialize metadata object to UTF-8 encoded JSON bytes."""
-        data = asdict(self)
+        """Serialize metadata object to compact UTF-8 encoded JSON bytes."""
+        data = {}
+        if self.file_name:
+            data["file_name"] = self.file_name
+        if self.file_extension:
+            data["file_extension"] = self.file_extension
+        if self.padding_bits != 0:
+            data["padding_bits"] = self.padding_bits
+        if self.intermediate_size != 0:
+            data["intermediate_size"] = self.intermediate_size
+        if self.frequencies:
+            data["frequencies"] = self.frequencies
+        if self.extra_attributes:
+            data["extra_attributes"] = self.extra_attributes
         return json.dumps(data, separators=(",", ":")).encode("utf-8")
 
     @classmethod

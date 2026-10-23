@@ -376,6 +376,7 @@ class AdaptiveCompressor:
             "selection_rationale": rationale,
             "original_size": orig_size,
             "payload_size": len(final_payload),
+            "overhead_size": len(container_bytes) - len(final_payload),
             "container_size": len(container_bytes),
             "compression_ratio": round(orig_size / max(len(container_bytes), 1), 3),
             "space_saving_pct": round(((orig_size - len(container_bytes)) / max(orig_size, 1)) * 100, 2),

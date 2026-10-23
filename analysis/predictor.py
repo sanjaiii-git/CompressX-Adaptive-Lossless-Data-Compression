@@ -132,7 +132,7 @@ class CompressionPredictor:
             candidates = ["RLE", "HYBRID", "DEFLATE", "LZ77"]
             benefit = "HIGH"
             confidence = "HIGH"
-            symbol_desc = "whitespace byte" if rep_stats.has_whitespace_runs else "symbol"
+            symbol_desc = "whitespace byte" if getattr(rep_stats, "has_whitespace_runs", False) else "symbol"
             reasons.append(
                 f"Pure single-{symbol_desc} sequence detected ({stats.unique_symbols} unique byte value, "
                 f"avg run length {rep_stats.average_run_length:.1f}). "
@@ -150,8 +150,8 @@ class CompressionPredictor:
             benefit = "HIGH"
             confidence = "HIGH"
             ws_note = ""
-            if rep_stats.has_whitespace_runs:
-                ws_note = f" (including {rep_stats.whitespace_run_bytes:,} bytes in repeated whitespace runs)"
+            if getattr(rep_stats, "has_whitespace_runs", False):
+                ws_note = f" (including {getattr(rep_stats, 'whitespace_run_bytes', 0):,} bytes in repeated whitespace runs)"
             reasons.append(
                 f"High run-length repetition detected (avg run length: {rep_stats.average_run_length:.2f}, "
                 f"{rep_stats.repetition_percentage:.1f}% repeated bytes{ws_note}). "

@@ -84,10 +84,10 @@ class AdaptiveCompressor:
             "is_skewed": data_stats.is_skewed,
             "most_frequent": data_stats.most_frequent,
             "least_frequent": data_stats.least_frequent,
-            "has_whitespace_runs": rep_stats.has_whitespace_runs,
-            "whitespace_run_bytes": rep_stats.whitespace_run_bytes,
-            "whitespace_run_count": rep_stats.whitespace_run_count,
-            "whitespace_breakdown": rep_stats.whitespace_breakdown,
+            "has_whitespace_runs": getattr(rep_stats, "has_whitespace_runs", False),
+            "whitespace_run_bytes": getattr(rep_stats, "whitespace_run_bytes", 0),
+            "whitespace_run_count": getattr(rep_stats, "whitespace_run_count", 0),
+            "whitespace_breakdown": getattr(rep_stats, "whitespace_breakdown", {}),
         }
         return profile, prediction
 

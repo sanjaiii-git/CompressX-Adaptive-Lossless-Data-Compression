@@ -194,6 +194,138 @@ class TestRepetitiveSelection:
         assert decomp == data
         assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
 
+    def test_case_1_100k_repeated_a(self, compressor):
+        """1. 100,000 repeated 'a' bytes."""
+        data = b"a" * 100000
+        container_bytes, selected_strat, pred, details = compressor.compress_adaptive(
+            data, file_name="100k_a.bin", objective="max_compression"
+        )
+        assert selected_strat in ("DEFLATE", "HYBRID", "RLE")
+        assert details["space_saving_pct"] > 95.0
+
+        # Verify next-best algorithm and delta diagnostics
+        assert "next_best_algorithm" in details
+        assert details["size_delta_bytes"] >= 0
+
+        decomp, ok, msg, info = AdaptiveCompressor.decompress_container(container_bytes)
+        assert ok is True and decomp == data
+        assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
+
+    def test_case_2_100k_space_bytes(self, compressor):
+        """2. 100,000 space bytes (whitespace runs)."""
+        data = b" " * 100000
+        profile, pred = compressor.analyze(data)
+        assert profile["has_whitespace_runs"] is True
+        assert profile["whitespace_run_bytes"] == 100000
+
+        container_bytes, selected_strat, _, details = compressor.compress_adaptive(
+            data, file_name="100k_spaces.txt", objective="max_compression"
+        )
+        assert selected_strat in ("DEFLATE", "HYBRID", "RLE")
+        assert details["space_saving_pct"] > 95.0
+
+        decomp, ok, msg, info = AdaptiveCompressor.decompress_container(container_bytes)
+        assert ok is True and decomp == data
+        assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
+
+    def test_case_3_repeated_newline_bytes(self, compressor):
+        """3. Repeated newline bytes (whitespace runs)."""
+        data = b"\n" * 10000
+        profile, pred = compressor.analyze(data)
+        assert profile["has_whitespace_runs"] is True
+        assert profile["whitespace_run_bytes"] == 10000
+
+        container_bytes, selected_strat, _, details = compressor.compress_adaptive(
+            data, file_name="newlines.txt", objective="max_compression"
+        )
+        assert selected_strat in ("HYBRID", "RLE", "DEFLATE")
+        assert details["space_saving_pct"] > 95.0
+
+        decomp, ok, msg, info = AdaptiveCompressor.decompress_container(container_bytes)
+        assert ok is True and decomp == data
+        assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
+
+    def test_case_4_alternating_abab(self, compressor):
+        """4. Alternating 'abababababab' (pattern repetition, no runs >= 2)."""
+        data = b"ab" * 10000
+        profile, pred = compressor.analyze(data)
+        # Run length is 1, so no repeated runs
+        assert profile["average_run_length"] == 1.0
+
+        container_bytes, selected_strat, _, details = compressor.compress_adaptive(
+            data, file_name="abab.txt", objective="max_compression"
+        )
+        # RLE must not win because it expands abab
+        assert selected_strat != "RLE"
+        assert selected_strat in ("DEFLATE", "LZ77", "LZW", "BWT")
+        assert details["space_saving_pct"] > 95.0
+
+        decomp, ok, msg, info = AdaptiveCompressor.decompress_container(container_bytes)
+        assert ok is True and decomp == data
+        assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
+
+    def test_case_5_repeated_words_and_paragraphs(self, compressor):
+        """5. Repeated words and ordinary paragraphs."""
+        paragraph = (
+            b"CompressX is an intelligent lossless data compression engine. "
+            b"It performs empirical content analysis across Shannon entropy, run-length distributions, "
+            b"and frequency skew to select optimal compression strategies without heuristic bias.\n"
+        )
+        data = paragraph * 100
+        container_bytes, selected_strat, _, details = compressor.compress_adaptive(
+            data, file_name="article.txt", objective="max_compression"
+        )
+        assert selected_strat in ("DEFLATE", "LZ77", "LZW", "BWT")
+        assert details["space_saving_pct"] > 80.0
+
+        decomp, ok, msg, info = AdaptiveCompressor.decompress_container(container_bytes)
+        assert ok is True and decomp == data
+        assert hashlib.sha256(decomp).hexdigest() == hashlib.sha256(data).hexdigest()
+
+    def test_case_6_mixed_whitespace_and_text(self, compressor):
+        """6. Mixed whitespace and text: 'aaaa\\n\\n\\n\\nbbbb' and separated spaces 'a a a a'."""
+        # Subcase 6a: runs of letters separated by runs of newlines
+        data_a = b"aaaa\n\n\n\nbbbb" * 200
+        profile_a, _ = compressor.analyze(data_a)
+        assert profile_a["has_whitespace_runs"] is True
+        assert profile_a["average_run_length"] == 4.0
+
+        c_a, strat_a, _, d_a = compressor.compress_adaptive(data_a, objective="max_compression")
+        decomp_a, ok_a, _, _ = AdaptiveCompressor.decompress_container(c_a)
+        assert ok_a and decomp_a == data_a
+
+        # Subcase 6b: isolated spaces 'a a a a' where spaces do NOT form runs
+        data_b = b"a a a a a a a a " * 200
+        profile_b, _ = compressor.analyze(data_b)
+        assert profile_b["has_whitespace_runs"] is False
+        assert profile_b["average_run_length"] == 1.0
+
+        c_b, strat_b, _, d_b = compressor.compress_adaptive(data_b, objective="max_compression")
+        decomp_b, ok_b, _, _ = AdaptiveCompressor.decompress_container(c_b)
+        assert ok_b and decomp_b == data_b
+
+    def test_case_7_random_binary_data(self, compressor):
+        """7. Random binary data (entropy ~ 8.0 bits/symbol)."""
+        data = os.urandom(3000)
+        c, strat, _, d = compressor.compress_adaptive(data, objective="max_compression")
+        assert strat == "NONE", f"Expected Raw Bypass (NONE) for random bytes, got {strat}"
+        decomp, ok, _, _ = AdaptiveCompressor.decompress_container(c)
+        assert ok and decomp == data
+
+    def test_case_8_empty_and_single_byte_files(self, compressor):
+        """8. Empty and single-byte files."""
+        # 8a: Empty file (0 bytes)
+        c_0, s_0, _, d_0 = compressor.compress_adaptive(b"", objective="max_compression")
+        assert s_0 == "NONE"
+        decomp_0, ok_0, _, _ = AdaptiveCompressor.decompress_container(c_0)
+        assert ok_0 and decomp_0 == b""
+
+        # 8b: Single-byte file (1 byte)
+        c_1, s_1, _, d_1 = compressor.compress_adaptive(b"Z", objective="max_compression")
+        assert s_1 == "NONE"
+        decomp_1, ok_1, _, _ = AdaptiveCompressor.decompress_container(c_1)
+        assert ok_1 and decomp_1 == b"Z"
+
 
 class TestRLECorrectness:
     """Detailed verification of RLE chunking, arbitrary binary data, and edge cases."""

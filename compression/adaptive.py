@@ -84,6 +84,10 @@ class AdaptiveCompressor:
             "is_skewed": data_stats.is_skewed,
             "most_frequent": data_stats.most_frequent,
             "least_frequent": data_stats.least_frequent,
+            "has_whitespace_runs": rep_stats.has_whitespace_runs,
+            "whitespace_run_bytes": rep_stats.whitespace_run_bytes,
+            "whitespace_run_count": rep_stats.whitespace_run_count,
+            "whitespace_breakdown": rep_stats.whitespace_breakdown,
         }
         return profile, prediction
 
@@ -297,9 +301,12 @@ class AdaptiveCompressor:
                 }
 
         # Select the best strategy according to the objective
-        selected_strategy, rationale = self.predictor.select_best(
+        decision = self.predictor.select_best(
             measured_candidates, objective=objective, original_size=orig_size
         )
+        selected_strategy = decision[0]
+        rationale = decision[1]
+        diagnostics = getattr(decision, "diagnostics", {})
 
         # Prepare final container and package
         if selected_strategy in ("NONE", "RAW"):
@@ -388,6 +395,11 @@ class AdaptiveCompressor:
             "peak_memory_kb": final_peak_mem,
             "profile": profile,
             "comparison_matrix": comparison_matrix,
+            "selection_diagnostics": diagnostics,
+            "next_best_algorithm": diagnostics.get("next_best_algorithm", ""),
+            "next_best_size": diagnostics.get("next_best_size", 0),
+            "size_delta_bytes": diagnostics.get("delta_bytes", 0),
+            "size_delta_pct": diagnostics.get("delta_pct", 0.0),
         }
 
         return container_bytes, selected_strategy, prediction, details

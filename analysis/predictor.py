@@ -48,6 +48,22 @@ class PredictionResult:
     explanation: str
 
 
+class SelectionDecision(tuple):
+    """Subclass of 2-tuple (strategy, rationale) maintaining backward compatibility while exposing diagnostics."""
+
+    def __new__(cls, strategy: str, rationale: str, diagnostics: Optional[Dict[str, Any]] = None):
+        return super().__new__(cls, (strategy, rationale))
+
+    def __init__(self, strategy: str, rationale: str, diagnostics: Optional[Dict[str, Any]] = None):
+        self.strategy = strategy
+        self.rationale = rationale
+        self.diagnostics = diagnostics or {}
+        self.next_best_algorithm = self.diagnostics.get("next_best_algorithm", "")
+        self.next_best_size = self.diagnostics.get("next_best_size", 0)
+        self.delta_bytes = self.diagnostics.get("delta_bytes", 0)
+        self.delta_pct = self.diagnostics.get("delta_pct", 0.0)
+
+
 class CompressionPredictor:
     """Intelligent decision engine for selecting compression algorithms."""
 
@@ -110,19 +126,20 @@ class CompressionPredictor:
                 "Applying compression will likely cause file expansion due to metadata overhead."
             )
 
-        # Case 2: Pure single-symbol repetition (e.g. 'aaaa...')
+        # Case 2: Pure single-symbol repetition (e.g. 'aaaa...' or '    ...')
         elif stats.unique_symbols == 1:
             strategy = "RLE"
             candidates = ["RLE", "HYBRID", "DEFLATE", "LZ77"]
             benefit = "HIGH"
             confidence = "HIGH"
+            symbol_desc = "whitespace byte" if rep_stats.has_whitespace_runs else "symbol"
             reasons.append(
-                f"Pure single-symbol sequence detected ({stats.unique_symbols} unique byte value, "
+                f"Pure single-{symbol_desc} sequence detected ({stats.unique_symbols} unique byte value, "
                 f"avg run length {rep_stats.average_run_length:.1f}). "
                 "RLE collapses continuous runs directly into minimal length tokens without dictionary overhead."
             )
 
-        # Case 3: Highly repetitive data or long runs
+        # Case 3: Highly repetitive data or long runs (including whitespace runs)
         elif repetition_level == "HIGH" or rep_stats.is_rle_promising:
             if rep_stats.average_run_length >= 3.0:
                 strategy = "RLE"
@@ -132,10 +149,13 @@ class CompressionPredictor:
                 candidates = ["HYBRID", "RLE", "DEFLATE", "LZ77", "LZW"]
             benefit = "HIGH"
             confidence = "HIGH"
+            ws_note = ""
+            if rep_stats.has_whitespace_runs:
+                ws_note = f" (including {rep_stats.whitespace_run_bytes:,} bytes in repeated whitespace runs)"
             reasons.append(
                 f"High run-length repetition detected (avg run length: {rep_stats.average_run_length:.2f}, "
-                f"{rep_stats.repetition_percentage:.1f}% repeated bytes). "
-                "Run-Length Encoding and Two-Stage Hybrid compression are the primary candidates for run collapsing."
+                f"{rep_stats.repetition_percentage:.1f}% repeated bytes{ws_note}). "
+                "Run-Length Encoding and Two-Stage Hybrid compression are primary candidates for run collapsing."
             )
 
         # Case 4: High skewness without long runs (natural language, code, structured tables)
@@ -187,7 +207,7 @@ class CompressionPredictor:
         measured_results: Dict[str, Dict[str, Any]],
         objective: str = "balanced",
         original_size: int = 1,
-    ) -> Tuple[str, str]:
+    ) -> SelectionDecision:
         """Select the best candidate algorithm based on actual measured metrics and objective.
 
         Args:
@@ -197,7 +217,7 @@ class CompressionPredictor:
             original_size: Size of uncompressed input data.
 
         Returns:
-            Tuple of (selected_strategy_name, selection_rationale).
+            SelectionDecision tuple (selected_strategy_name, selection_rationale) with diagnostics.
         """
         valid_candidates = {
             k: v for k, v in measured_results.items()
@@ -205,17 +225,33 @@ class CompressionPredictor:
         }
 
         if not valid_candidates:
-            return "NONE", "No candidate algorithm passed integrity verification; defaulting to Raw Bypass."
+            diag = {
+                "selected_algorithm": "NONE",
+                "next_best_algorithm": "None",
+                "next_best_size": original_size,
+                "delta_bytes": 0,
+                "delta_pct": 0.0,
+            }
+            return SelectionDecision("NONE", "No candidate algorithm passed integrity verification; defaulting to Raw Bypass.", diag)
 
         # Check if ALL algorithms caused file expansion
         min_stored_size = min(v["final_stored_size"] for v in valid_candidates.values())
         if min_stored_size >= original_size:
             best_expanding_cand = min(valid_candidates.keys(), key=lambda k: valid_candidates[k]["final_stored_size"])
-            return "NONE", (
+            delta_avoided = min_stored_size - original_size
+            diag = {
+                "selected_algorithm": "NONE",
+                "next_best_algorithm": best_expanding_cand,
+                "next_best_size": min_stored_size,
+                "delta_bytes": delta_avoided,
+                "delta_pct": round((delta_avoided / min_stored_size) * 100.0, 1),
+            }
+            rationale = (
                 f"All evaluated compression algorithms caused storage expansion "
                 f"(smallest candidate was {best_expanding_cand} with {min_stored_size:,} bytes vs {original_size:,} bytes original). "
-                f"Raw Bypass selected to prevent archive bloat."
+                f"Raw Bypass selected to prevent archive bloat (saved {delta_avoided:,} bytes vs {best_expanding_cand})."
             )
+            return SelectionDecision("NONE", rationale, diag)
 
         # Filter strictly to candidates achieving real positive compression
         compressing_candidates = {
@@ -224,7 +260,14 @@ class CompressionPredictor:
         }
 
         if not compressing_candidates:
-            return "NONE", "No algorithm achieved positive compression; Raw Bypass selected."
+            diag = {
+                "selected_algorithm": "NONE",
+                "next_best_algorithm": "None",
+                "next_best_size": original_size,
+                "delta_bytes": 0,
+                "delta_pct": 0.0,
+            }
+            return SelectionDecision("NONE", "No algorithm achieved positive compression; Raw Bypass selected.", diag)
 
         obj = objective.lower().replace(" ", "_")
 
@@ -237,28 +280,17 @@ class CompressionPredictor:
         min_saving = compressing_candidates[min_size_alg]["space_saving_pct"]
 
         if "max" in obj:
-            # Objective 1: Maximum Compression (strictly smallest final stored size)
-            rationale = (
-                f"Selected under 'Maximum Compression' objective: {min_size_alg} produced the smallest final container "
-                f"({min_size:,} bytes, {min_saving:.1f}% space saved)."
-            )
-            return min_size_alg, rationale
-
+            best_alg = min_size_alg
+            best_size = min_size
+            best_saving = min_saving
+            mode_label = "Maximum Compression"
         elif "fast" in obj or "speed" in obj:
-            # Objective 2: Fast Compression (fastest encoding time among candidates achieving positive compression)
-            fastest_alg = min(compressing_candidates.keys(), key=lambda k: compressing_candidates[k]["encoding_time"])
-            fastest_time = compressing_candidates[fastest_alg]["encoding_time"]
-            fastest_saving = compressing_candidates[fastest_alg]["space_saving_pct"]
-            rationale = (
-                f"Selected under 'Fast Compression' objective: {fastest_alg} achieved positive compression "
-                f"({fastest_saving:.1f}% space saved) with the lowest encoding latency ({fastest_time:.5f}s)."
-            )
-            return fastest_alg, rationale
-
+            best_alg = min(compressing_candidates.keys(), key=lambda k: compressing_candidates[k]["encoding_time"])
+            best_size = compressing_candidates[best_alg]["final_stored_size"]
+            best_saving = compressing_candidates[best_alg]["space_saving_pct"]
+            mode_label = "Fast Compression"
         else:
-            # Objective 3: Balanced (Transparent Multi-Criteria Cost Function)
-            # Size penalty dominates (85% weight) so that speed cannot override a genuinely smaller output.
-            # Speed penalty (15% weight) serves to break ties or select faster options when sizes are within ~2%.
+            # Balanced: Multi-criteria cost function (85% size penalty, 15% time penalty)
             max_size = max(v["final_stored_size"] for v in compressing_candidates.values())
             size_span = max(max_size - min_size, 1)
 
@@ -267,7 +299,7 @@ class CompressionPredictor:
             time_span = max(max_time - min_time, 1e-9)
 
             best_cost = float("inf")
-            best_alg = min_size_alg  # Frontrunner defaults to the candidate with the smallest stored size
+            best_alg = min_size_alg
 
             for alg, metrics in compressing_candidates.items():
                 norm_size = (metrics["final_stored_size"] - min_size) / size_span
@@ -279,10 +311,38 @@ class CompressionPredictor:
 
             best_size = compressing_candidates[best_alg]["final_stored_size"]
             best_saving = compressing_candidates[best_alg]["space_saving_pct"]
-            best_time = compressing_candidates[best_alg]["encoding_time"]
-            rationale = (
-                f"Selected under 'Balanced' objective: {best_alg} offered the optimal multi-criteria trade-off "
-                f"({best_saving:.1f}% space saved, {best_size:,} bytes stored, {best_time:.5f}s latency; "
-                f"formula: 0.85*size_norm + 0.15*time_norm)."
-            )
-            return best_alg, rationale
+            mode_label = "Balanced"
+
+        # Calculate margin / size difference to next-best candidate
+        other_candidates = [
+            (k, v["final_stored_size"]) for k, v in compressing_candidates.items() if k != best_alg
+        ]
+        if other_candidates:
+            next_best_alg, next_best_size = min(other_candidates, key=lambda x: x[1])
+            delta_bytes = next_best_size - best_size
+            delta_pct = round((delta_bytes / max(next_best_size, 1)) * 100.0, 1)
+            margin_text = f" Size margin over next-best ({next_best_alg}: {next_best_size:,} bytes): {delta_bytes:,} bytes ({delta_pct}% smaller)."
+        else:
+            next_best_alg = "None"
+            next_best_size = best_size
+            delta_bytes = 0
+            delta_pct = 0.0
+            margin_text = " (Sole candidate achieving positive compression)."
+
+        best_time = compressing_candidates[best_alg]["encoding_time"]
+        rationale = (
+            f"Selected under '{mode_label}' objective: {best_alg} produced a final container of "
+            f"{best_size:,} bytes ({best_saving:.1f}% space saved in {best_time:.5f}s).{margin_text}"
+        )
+
+        diag = {
+            "selected_algorithm": best_alg,
+            "selected_size": best_size,
+            "next_best_algorithm": next_best_alg,
+            "next_best_size": next_best_size,
+            "delta_bytes": delta_bytes,
+            "delta_pct": delta_pct,
+            "margin_text": margin_text.strip(),
+        }
+
+        return SelectionDecision(best_alg, rationale, diag)

@@ -8,8 +8,18 @@ Calculates run characteristics including:
 - Run-Length Suitability Score
 """
 
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Dict, Union
+
+# Common whitespace byte identifiers (ASCII / UTF-8)
+WHITESPACE_BYTE_NAMES = {
+    32: "spaces (0x20)",
+    9: "tabs (\\t)",
+    10: "newlines (\\n)",
+    13: "carriage returns (\\r)",
+    11: "vertical tabs (\\v)",
+    12: "form feeds (\\f)",
+}
 
 
 @dataclass
@@ -20,16 +30,20 @@ class RepetitionStats:
     max_run_length: int
     repetition_percentage: float
     is_rle_promising: bool
+    has_whitespace_runs: bool = False
+    whitespace_run_bytes: int = 0
+    whitespace_run_count: int = 0
+    whitespace_breakdown: Dict[str, int] = field(default_factory=dict)
 
 
 def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
-    """Analyze consecutive repetitive symbols in the input data.
+    """Analyze consecutive repetitive symbols in the input data, including whitespace runs.
 
     Args:
-        data: Input bytes or string.
+        data: Input bytes or string (analyzed losslessly without trimming or normalization).
 
     Returns:
-        RepetitionStats dataclass with calculated metrics.
+        RepetitionStats dataclass with calculated metrics and whitespace run participation.
     """
     if not data:
         return RepetitionStats(
@@ -38,6 +52,10 @@ def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
             max_run_length=0,
             repetition_percentage=0.0,
             is_rle_promising=False,
+            has_whitespace_runs=False,
+            whitespace_run_bytes=0,
+            whitespace_run_count=0,
+            whitespace_breakdown={},
         )
 
     if isinstance(data, str):
@@ -47,6 +65,11 @@ def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
     total_runs = 0
     max_run_len = 0
     symbols_in_runs_ge_2 = 0
+
+    has_ws_runs = False
+    ws_run_bytes = 0
+    ws_run_count = 0
+    ws_breakdown: Dict[str, int] = {}
 
     i = 0
     while i < total_len:
@@ -61,6 +84,12 @@ def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
 
         if run_len >= 2:
             symbols_in_runs_ge_2 += run_len
+            if current_byte in WHITESPACE_BYTE_NAMES:
+                has_ws_runs = True
+                ws_run_bytes += run_len
+                ws_run_count += 1
+                name = WHITESPACE_BYTE_NAMES[current_byte]
+                ws_breakdown[name] = ws_breakdown.get(name, 0) + run_len
 
         i += run_len
 
@@ -70,8 +99,8 @@ def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
     # RLE encodes each run as 2 bytes: (count, symbol).
     # Compressed size under RLE will be total_runs * 2 bytes.
     # RLE is mathematically profitable if 2 * total_runs < total_len
-    # which is equivalent to avg_run_len > 2.0.
-    is_rle_promising = avg_run_len > 2.0 or repetition_pct > 35.0
+    # which is equivalent to avg_run_len > 2.0 or repetition_pct > 35%.
+    is_rle_promising = avg_run_len > 2.0 or repetition_pct > 35.0 or (has_ws_runs and ws_run_bytes >= 32)
 
     return RepetitionStats(
         total_runs=total_runs,
@@ -79,4 +108,8 @@ def analyze_repetition(data: Union[bytes, str]) -> RepetitionStats:
         max_run_length=max_run_len,
         repetition_percentage=repetition_pct,
         is_rle_promising=is_rle_promising,
+        has_whitespace_runs=has_ws_runs,
+        whitespace_run_bytes=ws_run_bytes,
+        whitespace_run_count=ws_run_count,
+        whitespace_breakdown=ws_breakdown,
     )

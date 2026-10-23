@@ -966,6 +966,27 @@ if current_page == "compress":
                 <p class="stat-sub stat-sub-orange">Distribution skew (0–1)</p>
             </div>""", unsafe_allow_html=True)
 
+        # Whitespace Run Participation Diagnostic
+        ws_has = profile.get("has_whitespace_runs", False)
+        ws_bytes = profile.get("whitespace_run_bytes", 0)
+        ws_breakdown = profile.get("whitespace_breakdown", {})
+        if ws_has and ws_bytes > 0:
+            ws_bd_str = ", ".join(f"{v:,} {k}" for k, v in ws_breakdown.items()) if ws_breakdown else f"{ws_bytes:,} bytes"
+            ws_chip_html = f"""
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:9px 14px; margin:10px 0; font-size:0.78rem; color:#15803d; display:flex; align-items:center; gap:8px;">
+                <span style="background:#dcfce7; padding:2px 6px; border-radius:4px; font-weight:800;">WHITESPACE RUNS ACTIVE</span>
+                <span>{ws_bytes:,} bytes in repeated whitespace runs ({ws_bd_str}). Handled losslessly without trimming.</span>
+            </div>
+            """
+        else:
+            ws_chip_html = """
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:9px 14px; margin:10px 0; font-size:0.78rem; color:#64748b; display:flex; align-items:center; gap:8px;">
+                <span style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-weight:700;">WHITESPACE RUNS</span>
+                <span>No multi-byte consecutive whitespace runs detected (spaces/newlines analyzed as isolated tokens).</span>
+            </div>
+            """
+        st.markdown(ws_chip_html, unsafe_allow_html=True)
+
         # Recommendation Banner
         benefit_color = {"HIGH": "#15803d", "MODERATE": "#1d4ed8", "LOW": "#c2410c", "NEGLIGIBLE": "#b91c1c"}
         bc = benefit_color.get(prediction.expected_benefit, "#475569")
@@ -1072,6 +1093,10 @@ if current_page == "compress":
                 "sha256_decompressed": decomp_sha,
                 "decompressed_bytes": decomp_bytes,
                 "comparison_matrix": details["comparison_matrix"],
+                "next_best_algorithm": details.get("next_best_algorithm", ""),
+                "next_best_size": details.get("next_best_size", 0),
+                "size_delta_bytes": details.get("size_delta_bytes", 0),
+                "size_delta_pct": details.get("size_delta_pct", 0.0),
             }
 
             add_history_entry(

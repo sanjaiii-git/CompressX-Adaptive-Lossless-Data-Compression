@@ -297,6 +297,24 @@ def generate_pdf_report(
             Paragraph("Non-uniformity of symbol distribution (0=flat, 1=skewed). Higher values favor variable-length prefix coding.", body_style),
         ],
     ]
+
+    has_ws = profile.get("has_whitespace_runs", False)
+    ws_bytes = profile.get("whitespace_run_bytes", 0)
+    ws_breakdown = profile.get("whitespace_breakdown", {})
+    if has_ws and ws_bytes > 0:
+        bd_str = ", ".join(f"{v:,} {k}" for k, v in ws_breakdown.items()) if ws_breakdown else f"{ws_bytes:,} bytes"
+        ws_val_str = f"<b>YES</b> ({ws_bytes:,} bytes)"
+        ws_impact = f"Whitespace actively participates in repeated runs ({bd_str}). Preserved losslessly."
+    else:
+        ws_val_str = "<b>NO</b> (0 run bytes)"
+        ws_impact = "Whitespace characters do not form consecutive multi-byte runs (length >= 2)."
+
+    analysis_data.append([
+        Paragraph("Whitespace Run Participation", body_style),
+        Paragraph(ws_val_str, body_style),
+        Paragraph(ws_impact, body_style),
+    ])
+
     t_analysis = Table(analysis_data, colWidths=[130, 85, 325])
     t_analysis.setStyle(
         TableStyle([

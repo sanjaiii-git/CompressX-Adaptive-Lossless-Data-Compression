@@ -56,8 +56,8 @@ class LZ77Compressor:
                 if prefix in pos_hash:
                     # Check recent candidates in window
                     candidates = pos_hash[prefix]
-                    # Filter out candidates outside current window
-                    valid_candidates = [c for c in candidates if c >= window_start]
+                    # Filter out candidates outside current window (keep most recent 32)
+                    valid_candidates = [c for c in candidates[-32:] if c >= window_start]
                     pos_hash[prefix] = valid_candidates
 
                     max_possible = min(cls.MAX_MATCH, n - pos)

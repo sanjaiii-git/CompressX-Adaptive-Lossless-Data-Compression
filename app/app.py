@@ -63,47 +63,57 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-/* Global Reset */
-html, body, [class*="css"] {
+/* Global Light Reset */
+html, body, [class*="css"], .stApp {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+.main {
+    background-color: #f8fafc !important;
 }
 .main .block-container {
     padding: 0 1.5rem 2rem 1.5rem !important;
     max-width: 100% !important;
+    background-color: #f8fafc !important;
 }
 
-/* Sidebar Container */
+/* Sidebar Container - Clean Light Background */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(175deg, #164e2b 0%, #114223 55%, #0a2d17 100%) !important;
-    min-width: 240px !important;
-    max-width: 240px !important;
+    background: #ffffff !important;
+    border-right: 1px solid #e2e8f0 !important;
+    min-width: 250px !important;
+    max-width: 250px !important;
 }
 section[data-testid="stSidebar"] > div {
     padding: 0 !important;
+    background: #ffffff !important;
 }
 button[data-testid="collapsedControl"] { display: none !important; }
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
 
-/* Sidebar Brand Header */
+/* Sidebar Brand Header - Vibrant Emerald Green Card */
 .sb-brand {
-    background: linear-gradient(135deg, #1b5731 0%, #0d381c 100%);
-    padding: 22px 18px 16px 18px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    margin-bottom: 8px;
+    background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+    padding: 18px 16px !important;
+    border-radius: 12px !important;
+    margin: 14px 12px 18px 12px !important;
+    box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2) !important;
 }
 .sb-brand-title {
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #ffffff;
-    letter-spacing: -0.01em;
-    margin: 0;
+    font-size: 1.15rem !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    letter-spacing: -0.01em !important;
+    margin: 0 !important;
 }
 .sb-brand-subtitle {
-    font-size: 0.72rem;
-    color: rgba(255,255,255,0.65);
-    margin: 3px 0 0 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: 0.72rem !important;
+    color: #a7f3d0 !important;
+    margin: 3px 0 0 0 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    font-weight: 600 !important;
 }
 
 /* Sidebar Navigation Items */
@@ -113,23 +123,26 @@ button[data-testid="collapsedControl"] { display: none !important; }
     padding: 11px 14px;
     border-radius: 8px;
     margin: 3px 0;
-    color: rgba(255,255,255,0.78);
+    color: #475569;
     font-size: 0.85rem;
     font-weight: 500;
     text-decoration: none;
 }
 .sb-nav-item.active {
-    background: rgba(255,255,255,0.14);
-    color: #ffffff;
+    background: #ffffff;
+    color: #2563eb;
     font-weight: 700;
-    border-left: 3px solid #5ee890;
+    border-left: 3px solid #2563eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 /* Sidebar User Status Panel */
 .sb-bottom {
-    padding: 12px 14px;
-    border-top: 1px solid rgba(255,255,255,0.1);
-    background: rgba(0,0,0,0.12);
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    margin: 0 12px;
 }
 .sb-user-card {
     display: flex;
@@ -140,14 +153,14 @@ button[data-testid="collapsedControl"] { display: none !important; }
 .sb-user-monogram {
     width: 32px;
     height: 32px;
-    background: #22c55e;
-    border-radius: 6px;
+    background: #dcfce7;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0.75rem;
     font-weight: 800;
-    color: #052e16;
+    color: #15803d;
     letter-spacing: 0.05em;
 }
 .sb-user-info p {
@@ -155,13 +168,13 @@ button[data-testid="collapsedControl"] { display: none !important; }
     line-height: 1.25;
 }
 .sb-user-name {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #0f172a;
 }
 .sb-user-role {
     font-size: 0.68rem;
-    color: rgba(255,255,255,0.6);
+    color: #64748b;
 }
 
 /* Top Header Bar */
@@ -174,9 +187,9 @@ button[data-testid="collapsedControl"] { display: none !important; }
     margin-bottom: 20px;
 }
 .header-left h1 {
-    font-size: 1.5rem;
+    font-size: 1.55rem;
     font-weight: 800;
-    color: #0f172a;
+    color: #059669 !important;
     margin: 0;
     letter-spacing: -0.02em;
 }
@@ -206,9 +219,9 @@ button[data-testid="collapsedControl"] { display: none !important; }
     border-radius: 50%;
 }
 
-/* Welcome Banner */
+/* Welcome Banner - Rich Emerald to Cobalt Gradient */
 .welcome-banner {
-    background: linear-gradient(120deg, #134e2a 0%, #1e587a 50%, #2563eb 100%);
+    background: linear-gradient(135deg, #059669 0%, #10b981 35%, #2563eb 100%) !important;
     border-radius: 12px;
     padding: 26px 30px;
     display: flex;
@@ -217,6 +230,7 @@ button[data-testid="collapsedControl"] { display: none !important; }
     margin-bottom: 22px;
     position: relative;
     overflow: hidden;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12) !important;
 }
 .wb-title {
     font-size: 1.3rem;
@@ -515,43 +529,71 @@ button[data-testid="collapsedControl"] { display: none !important; }
 
 /* Streamlit Button Overrides */
 .stDownloadButton > button {
-    background: #164e2b !important;
+    background: #059669 !important;
     color: white !important;
     border: none !important;
-    border-radius: 6px !important;
+    border-radius: 8px !important;
     font-weight: 600 !important;
-    font-size: 0.82rem !important;
-    padding: 9px 14px !important;
+    font-size: 0.84rem !important;
+    padding: 10px 16px !important;
     width: 100% !important;
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.2) !important;
+    transition: all 0.15s ease !important;
 }
 .stDownloadButton > button:hover {
-    background: #114223 !important;
+    background: #047857 !important;
+    box-shadow: 0 4px 10px rgba(5, 150, 105, 0.3) !important;
 }
 .stButton > button[kind="primary"] {
-    background: #164e2b !important;
+    background: #059669 !important;
     color: white !important;
     border: none !important;
-    border-radius: 6px !important;
+    border-radius: 8px !important;
     font-weight: 700 !important;
-    font-size: 0.86rem !important;
-    padding: 11px 20px !important;
+    font-size: 0.88rem !important;
+    padding: 11px 22px !important;
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.25) !important;
+    transition: all 0.15s ease !important;
 }
 .stButton > button[kind="primary"]:hover {
-    background: #114223 !important;
+    background: #047857 !important;
+    box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35) !important;
 }
-section[data-testid="stSidebar"] .stButton > button {
-    width: 100% !important;
-    border-radius: 6px !important;
-    font-weight: 500 !important;
-    font-size: 0.82rem !important;
+
+/* Sidebar Navigation Buttons - Clean Modern Pills */
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: #ffffff !important;
+    color: #2563eb !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+    font-weight: 700 !important;
+    font-size: 0.85rem !important;
+    padding: 10px 14px !important;
     text-align: left !important;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="secondary"],
+section[data-testid="stSidebar"] .stButton > button {
+    background: transparent !important;
+    color: #475569 !important;
+    border: 1px solid transparent !important;
+    border-radius: 10px !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
+    padding: 10px 14px !important;
+    text-align: left !important;
+    transition: all 0.15s ease !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
 }
 
 /* File Uploader styling */
 [data-testid="stFileUploaderDropzone"] {
-    border: 2px dashed #94a3b8 !important;
-    border-radius: 10px !important;
-    background: #f8fafc !important;
+    border: 2px dashed #cbd5e1 !important;
+    border-radius: 12px !important;
+    background: #ffffff !important;
 }
 
 #MainMenu { visibility: hidden; }

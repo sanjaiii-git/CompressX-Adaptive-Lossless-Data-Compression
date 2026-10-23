@@ -27,15 +27,33 @@ ALG_NONE = 0
 ALG_RLE = 1
 ALG_HUFFMAN = 2
 ALG_HYBRID = 3
+ALG_LZ77 = 4
+ALG_DEFLATE = 5
+ALG_LZW = 6
+ALG_BWT = 7
 
 ALG_MAP = {
     "NONE": ALG_NONE,
+    "RAW": ALG_NONE,
     "RLE": ALG_RLE,
     "HUFFMAN": ALG_HUFFMAN,
     "HYBRID": ALG_HYBRID,
+    "LZ77": ALG_LZ77,
+    "DEFLATE": ALG_DEFLATE,
+    "LZW": ALG_LZW,
+    "BWT": ALG_BWT,
 }
 
-REV_ALG_MAP = {v: k for k, v in ALG_MAP.items()}
+REV_ALG_MAP = {
+    ALG_NONE: "NONE",
+    ALG_RLE: "RLE",
+    ALG_HUFFMAN: "HUFFMAN",
+    ALG_HYBRID: "HYBRID",
+    ALG_LZ77: "LZ77",
+    ALG_DEFLATE: "DEFLATE",
+    ALG_LZW: "LZW",
+    ALG_BWT: "BWT",
+}
 
 
 @dataclass

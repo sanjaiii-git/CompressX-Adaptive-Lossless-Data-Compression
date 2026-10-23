@@ -1,6 +1,7 @@
-"""Benchmarking framework for comparing RLE, Huffman, Hybrid, Adaptive, and GZIP baseline."""
+"""Benchmarking framework for comparing RLE, Huffman, Hybrid, LZ77, DEFLATE, LZW, BWT, Adaptive, and GZIP."""
 
 import gzip
+import json
 import os
 import sys
 import time
@@ -15,6 +16,10 @@ from compression.adaptive import AdaptiveCompressor
 from compression.huffman import HuffmanCompressor
 from compression.hybrid import HybridCompressor
 from compression.rle import RLECompressor
+from compression.lz77 import LZ77Compressor
+from compression.deflate import DeflateCompressor
+from compression.lzw import LZWCompressor
+from compression.bwt import BWTCompressor
 from evaluation.metrics import verify_integrity
 
 
@@ -35,102 +40,149 @@ class BenchmarkRunner:
 
         results = []
 
+        def benchmark_method(name: str, compress_fn, decompress_fn):
+            tracemalloc.start()
+            t0 = time.perf_counter()
+            comp_data = compress_fn(data)
+            t_enc = time.perf_counter() - t0
+            _, peak_mem = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+
+            t0 = time.perf_counter()
+            decomp_data = decompress_fn(comp_data)
+            t_dec = time.perf_counter() - t0
+
+            is_valid, _, _ = verify_integrity(data, decomp_data)
+            comp_size = len(comp_data)
+            ratio = round(orig_size / max(comp_size, 1), 3)
+            saving = round(((orig_size - comp_size) / max(orig_size, 1)) * 100, 2)
+            throughput = round(orig_size / max(t_enc, 1e-9), 1)
+
+            results.append({
+                "Dataset": dataset_name,
+                "Algorithm": name,
+                "Original Size (B)": orig_size,
+                "Compressed Size (B)": comp_size,
+                "Ratio": ratio,
+                "Space Saved (%)": saving,
+                "Encoding Time (s)": round(t_enc, 5),
+                "Decoding Time (s)": round(t_dec, 5),
+                "Throughput (B/s)": throughput,
+                "Peak Memory (KB)": round(peak_mem / 1024, 2),
+                "Integrity": "PASSED" if is_valid else "FAILED",
+            })
+
         # 1. RLE
-        t0 = time.perf_counter()
-        rle_comp = RLECompressor.compress(data)
-        t_rle_enc = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        rle_decomp = RLECompressor.decompress(rle_comp)
-        t_rle_dec = time.perf_counter() - t0
-        rle_valid, _, _ = verify_integrity(data, rle_decomp)
-
-        results.append({
-            "Dataset": dataset_name,
-            "Algorithm": "RLE",
-            "Original Size (B)": orig_size,
-            "Compressed Size (B)": len(rle_comp),
-            "Ratio": round(orig_size / max(len(rle_comp), 1), 3),
-            "Space Saved (%)": round(((orig_size - len(rle_comp)) / max(orig_size, 1)) * 100, 2),
-            "Encoding Time (s)": round(t_rle_enc, 5),
-            "Decoding Time (s)": round(t_rle_dec, 5),
-            "Integrity": "PASSED" if rle_valid else "FAILED",
-        })
+        benchmark_method("RLE", RLECompressor.compress, RLECompressor.decompress)
 
         # 2. Huffman
+        def huff_comp(d):
+            c, freqs, pad = HuffmanCompressor.compress(d)
+            return (c, freqs, pad)
+
+        def huff_decomp(pkg):
+            c, freqs, pad = pkg
+            return HuffmanCompressor.decompress(c, freqs, pad, original_size=orig_size)
+
+        tracemalloc.start()
         t0 = time.perf_counter()
-        huff_comp, huff_freq, huff_pad = HuffmanCompressor.compress(data)
+        h_pkg = huff_comp(data)
         t_huff_enc = time.perf_counter() - t0
+        _, peak_mem = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
 
         t0 = time.perf_counter()
-        huff_decomp = HuffmanCompressor.decompress(
-            huff_comp, huff_freq, huff_pad, original_size=orig_size
-        )
+        h_decomp = huff_decomp(h_pkg)
         t_huff_dec = time.perf_counter() - t0
-        huff_valid, _, _ = verify_integrity(data, huff_decomp)
+        h_valid, _, _ = verify_integrity(data, h_decomp)
+        h_size = len(h_pkg[0])
 
         results.append({
             "Dataset": dataset_name,
             "Algorithm": "Huffman",
             "Original Size (B)": orig_size,
-            "Compressed Size (B)": len(huff_comp),
-            "Ratio": round(orig_size / max(len(huff_comp), 1), 3),
-            "Space Saved (%)": round(((orig_size - len(huff_comp)) / max(orig_size, 1)) * 100, 2),
+            "Compressed Size (B)": h_size,
+            "Ratio": round(orig_size / max(h_size, 1), 3),
+            "Space Saved (%)": round(((orig_size - h_size) / max(orig_size, 1)) * 100, 2),
             "Encoding Time (s)": round(t_huff_enc, 5),
             "Decoding Time (s)": round(t_huff_dec, 5),
-            "Integrity": "PASSED" if huff_valid else "FAILED",
+            "Throughput (B/s)": round(orig_size / max(t_huff_enc, 1e-9), 1),
+            "Peak Memory (KB)": round(peak_mem / 1024, 2),
+            "Integrity": "PASSED" if h_valid else "FAILED",
         })
 
         # 3. Hybrid (RLE + Huffman)
+        def hyb_comp(d):
+            c, freqs, pad, inter = HybridCompressor.compress(d)
+            return (c, freqs, pad, inter)
+
+        def hyb_decomp(pkg):
+            c, freqs, pad, inter = pkg
+            return HybridCompressor.decompress(c, freqs, pad, intermediate_size=inter)
+
+        tracemalloc.start()
         t0 = time.perf_counter()
-        hyb_comp, hyb_freq, hyb_pad, inter_sz = HybridCompressor.compress(data)
+        hyb_pkg = hyb_comp(data)
         t_hyb_enc = time.perf_counter() - t0
+        _, peak_mem = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
 
         t0 = time.perf_counter()
-        hyb_decomp = HybridCompressor.decompress(
-            hyb_comp, hyb_freq, hyb_pad, intermediate_size=inter_sz
-        )
+        hyb_d = hyb_decomp(hyb_pkg)
         t_hyb_dec = time.perf_counter() - t0
-        hyb_valid, _, _ = verify_integrity(data, hyb_decomp)
+        hyb_valid, _, _ = verify_integrity(data, hyb_d)
+        hyb_size = len(hyb_pkg[0])
 
         results.append({
             "Dataset": dataset_name,
             "Algorithm": "Hybrid (RLE+Huffman)",
             "Original Size (B)": orig_size,
-            "Compressed Size (B)": len(hyb_comp),
-            "Ratio": round(orig_size / max(len(hyb_comp), 1), 3),
-            "Space Saved (%)": round(((orig_size - len(hyb_comp)) / max(orig_size, 1)) * 100, 2),
+            "Compressed Size (B)": hyb_size,
+            "Ratio": round(orig_size / max(hyb_size, 1), 3),
+            "Space Saved (%)": round(((orig_size - hyb_size) / max(orig_size, 1)) * 100, 2),
             "Encoding Time (s)": round(t_hyb_enc, 5),
             "Decoding Time (s)": round(t_hyb_dec, 5),
+            "Throughput (B/s)": round(orig_size / max(t_hyb_enc, 1e-9), 1),
+            "Peak Memory (KB)": round(peak_mem / 1024, 2),
             "Integrity": "PASSED" if hyb_valid else "FAILED",
         })
 
-        # 4. Adaptive System (with full Container package)
-        t0 = time.perf_counter()
-        adapt_pkg, adapt_strat, pred_res, details = self.adaptive_comp.compress_adaptive(
-            data, file_name=dataset_name, selection_mode="evaluate_all"
-        )
-        t_adapt_enc = time.perf_counter() - t0
+        # 4. LZ77
+        benchmark_method("LZ77", LZ77Compressor.compress, LZ77Compressor.decompress)
 
-        t0 = time.perf_counter()
-        adapt_decomp, adapt_valid, _, _ = AdaptiveCompressor.decompress_container(adapt_pkg)
-        t_adapt_dec = time.perf_counter() - t0
+        # 5. DEFLATE (Standard Library RFC 1951)
+        benchmark_method("DEFLATE", DeflateCompressor.compress, DeflateCompressor.decompress)
+
+        # 6. LZW
+        benchmark_method("LZW", LZWCompressor.compress, LZWCompressor.decompress)
+
+        # 7. BWT
+        benchmark_method("BWT", BWTCompressor.compress, BWTCompressor.decompress)
+
+        # 8. CompressX Adaptive (Full Container Pipeline)
+        c_bytes, chosen_strat, pred_obj, details = self.adaptive_comp.compress_adaptive(
+            data, file_name=dataset_name, objective="balanced"
+        )
+        decomp_bytes, ad_valid, _, info = AdaptiveCompressor.decompress_container(c_bytes)
+        ad_size = len(c_bytes)
 
         results.append({
             "Dataset": dataset_name,
-            "Algorithm": f"Adaptive ({adapt_strat})",
+            "Algorithm": f"CompressX Adaptive ({chosen_strat})",
             "Original Size (B)": orig_size,
-            "Compressed Size (B)": len(adapt_pkg),
-            "Ratio": round(orig_size / max(len(adapt_pkg), 1), 3),
-            "Space Saved (%)": round(((orig_size - len(adapt_pkg)) / max(orig_size, 1)) * 100, 2),
-            "Encoding Time (s)": round(t_adapt_enc, 5),
-            "Decoding Time (s)": round(t_adapt_dec, 5),
-            "Integrity": "PASSED" if adapt_valid else "FAILED",
+            "Compressed Size (B)": ad_size,
+            "Ratio": details["compression_ratio"],
+            "Space Saved (%)": details["space_saving_pct"],
+            "Encoding Time (s)": details["encoding_time"],
+            "Decoding Time (s)": info["decoding_time"],
+            "Throughput (B/s)": details["throughput_bps"],
+            "Peak Memory (KB)": details["peak_memory_kb"],
+            "Integrity": "PASSED" if ad_valid else "FAILED",
         })
 
-        # 5. GZIP (Industrial standard baseline)
+        # 9. GZIP Baseline
         t0 = time.perf_counter()
-        gzip_comp = gzip.compress(data)
+        gzip_comp = gzip.compress(data, compresslevel=9)
         t_gzip_enc = time.perf_counter() - t0
 
         t0 = time.perf_counter()
@@ -147,67 +199,54 @@ class BenchmarkRunner:
             "Space Saved (%)": round(((orig_size - len(gzip_comp)) / max(orig_size, 1)) * 100, 2),
             "Encoding Time (s)": round(t_gzip_enc, 5),
             "Decoding Time (s)": round(t_gzip_dec, 5),
+            "Throughput (B/s)": round(orig_size / max(t_gzip_enc, 1e-9), 1),
+            "Peak Memory (KB)": 0.0,
             "Integrity": "PASSED" if gzip_valid else "FAILED",
         })
 
-        analysis_summary = {
+        summary = {
             "dataset": dataset_name,
+            "original_size": orig_size,
             "profile": profile,
             "prediction": prediction,
-            "actual_selected": adapt_strat,
-            "prediction_match": details["prediction_accurate"],
+            "actual_selected": chosen_strat,
+            "prediction_match": (
+                chosen_strat == prediction.recommended_strategy
+                or (chosen_strat in ("RLE", "HYBRID") and prediction.recommended_strategy in ("RLE", "HYBRID"))
+                or (chosen_strat in ("DEFLATE", "LZ77", "LZW") and prediction.recommended_strategy in ("DEFLATE", "LZ77", "LZW"))
+            ),
         }
 
-        return results, analysis_summary
+        return results, summary
 
-    def run_all(self, dataset_dict: Dict[str, str]) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
-        """Run benchmark across all dataset files in dictionary."""
-        all_rows = []
+    def run_all(
+        self, dataset_files: Dict[str, str], output_dir: Optional[str] = None
+    ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+        """Run benchmark on all datasets and save machine-readable results."""
+        all_results = []
         all_summaries = []
 
-        for name, path in dataset_dict.items():
-            if not os.path.exists(path):
-                continue
-            with open(path, "rb") as f:
-                data = f.read()
-            rows, summary = self.run_single_dataset(name, data)
-            all_rows.extend(rows)
-            all_summaries.append(summary)
+        for name, path in dataset_files.items():
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    data = f.read()
+                results, summary = self.run_single_dataset(name, data)
+                all_results.extend(results)
+                all_summaries.append(summary)
 
-        df = pd.DataFrame(all_rows)
+        df = pd.DataFrame(all_results)
+
+        # Save to disk if requested
+        target_dir = output_dir or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "results"
+        )
+        os.makedirs(target_dir, exist_ok=True)
+
+        csv_path = os.path.join(target_dir, "benchmark_results.csv")
+        json_path = os.path.join(target_dir, "benchmark_results.json")
+
+        df.to_csv(csv_path, index=False)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(all_results, f, indent=2)
+
         return df, all_summaries
-
-
-if __name__ == "__main__":
-    from datasets.generate_datasets import DATASET_DIR, generate_all_datasets
-
-    dataset_files = {
-        "Dataset A (Repetitive)": os.path.join(DATASET_DIR, "dataset_a_repetitive.txt"),
-        "Dataset B (Skewed)": os.path.join(DATASET_DIR, "dataset_b_skewed.txt"),
-        "Dataset C (Natural Text)": os.path.join(DATASET_DIR, "dataset_c_natural_text.txt"),
-        "Dataset D (Server Logs)": os.path.join(DATASET_DIR, "dataset_d_server_logs.log"),
-        "Dataset E (Random Data)": os.path.join(DATASET_DIR, "dataset_e_random_data.bin"),
-    }
-
-    runner = BenchmarkRunner()
-    df, summaries = runner.run_all(dataset_files)
-
-    print("\n================ BENCHMARK RESULTS ================")
-    print(df.to_string(index=False))
-
-    print("\n================ PREDICTION EVALUATION ================")
-    correct = 0
-    total = len(summaries)
-    for s in summaries:
-        pred = s["prediction"]
-        act = s["actual_selected"]
-        match = "[OK] CORRECT" if s["prediction_match"] else "[!] MISMATCH"
-        if s["prediction_match"]:
-            correct += 1
-        print(f"[{s['dataset']}]")
-        print(f"  Entropy: {s['profile']['entropy']} bits/sym | Repetition: {s['profile']['repetition_percentage']}%")
-        print(f"  Predicted: {pred.recommended_strategy} | Actual Selected: {act} -> {match}")
-        print(f"  Rationale: {pred.explanation[:120]}...\n")
-
-    accuracy = (correct / total) * 100.0 if total > 0 else 0.0
-    print(f"Overall Prediction Accuracy: {accuracy:.1f}% ({correct}/{total})")

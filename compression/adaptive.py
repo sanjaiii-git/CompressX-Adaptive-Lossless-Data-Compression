@@ -1,16 +1,28 @@
 """Adaptive intelligent compression engine.
 
-Combines data analysis, predictive modeling, multi-criteria cost scoring,
-and container packaging into a unified interface.
+Combines information-theoretic data profiling, predictive modeling, multi-criteria
+cost scoring, and container packaging into a unified interface.
 
-Supports two operational selection paradigms:
-1. Prediction-Based Selection: Selects strategy based purely on pre-compression statistical features.
-2. Performance-Based Selection: Benchmarks all candidate strategies and chooses the optimal cost trade-off.
+Supports 8 Lossless Compression Algorithms:
+1. RAW (Bypass mode for incompressible streams)
+2. RLE (Run-Length Encoding)
+3. HUFFMAN (Canonical Huffman Prefix Coding)
+4. HYBRID (Sequential Two-Stage RLE + Huffman)
+5. LZ77 (Sliding-Window Dictionary Encoding)
+6. DEFLATE (LZ77 + Huffman RFC 1951)
+7. LZW (Lempel-Ziv-Welch Dictionary Encoding)
+8. BWT (Burrows-Wheeler Transform + MTF + Zero-RLE)
+
+Supports 3 Configurable Objectives:
+- 'max_compression': Strictly prioritizes minimum stored artifact size.
+- 'balanced': Multi-criteria cost optimization (size, encoding latency, memory).
+- 'fast': Prioritizes encoding throughput while avoiding file expansion.
 """
 
 import hashlib
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+import tracemalloc
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from analysis.entropy import calculate_entropy
 from analysis.repetition import analyze_repetition
@@ -21,10 +33,24 @@ from storage.metadata import Metadata
 from .rle import RLECompressor
 from .huffman import HuffmanCompressor
 from .hybrid import HybridCompressor
+from .lz77 import LZ77Compressor
+from .deflate import DeflateCompressor
+from .lzw import LZWCompressor
+from .bwt import BWTCompressor
 
 
 class AdaptiveCompressor:
     """Orchestrates adaptive strategy selection, compression, and verification."""
+
+    SUPPORTED_ALGORITHMS = [
+        "DEFLATE",
+        "LZ77",
+        "LZW",
+        "HUFFMAN",
+        "HYBRID",
+        "RLE",
+        "BWT",
+    ]
 
     def __init__(self, weights: Optional[CostWeights] = None):
         self.weights = weights or CostWeights()
@@ -56,14 +82,14 @@ class AdaptiveCompressor:
         self, strategy: str, data: bytes, file_name: str = ""
     ) -> Tuple[bytes, Metadata]:
         """Compress data using a specific strategy and prepare container metadata."""
-        strategy = strategy.upper()
+        strat = strategy.upper()
 
-        if strategy == "RLE":
+        if strat == "RLE":
             payload = RLECompressor.compress(data)
             meta = Metadata(file_name=file_name)
             return payload, meta
 
-        elif strategy == "HUFFMAN":
+        elif strat == "HUFFMAN":
             payload, freqs, pad = HuffmanCompressor.compress(data)
             str_freqs = {str(k): v for k, v in freqs.items()}
             meta = Metadata(
@@ -73,7 +99,7 @@ class AdaptiveCompressor:
             )
             return payload, meta
 
-        elif strategy == "HYBRID":
+        elif strat == "HYBRID":
             payload, freqs, pad, inter_size = HybridCompressor.compress(data)
             str_freqs = {str(k): v for k, v in freqs.items()}
             meta = Metadata(
@@ -84,101 +110,274 @@ class AdaptiveCompressor:
             )
             return payload, meta
 
+        elif strat == "LZ77":
+            payload = LZ77Compressor.compress(data)
+            meta = Metadata(file_name=file_name)
+            return payload, meta
+
+        elif strat == "DEFLATE":
+            payload = DeflateCompressor.compress(data, level=9)
+            meta = Metadata(
+                file_name=file_name,
+                extra_attributes={"engine": DeflateCompressor.ENGINE},
+            )
+            return payload, meta
+
+        elif strat == "LZW":
+            payload = LZWCompressor.compress(data)
+            meta = Metadata(file_name=file_name)
+            return payload, meta
+
+        elif strat == "BWT":
+            payload = BWTCompressor.compress(data)
+            meta = Metadata(file_name=file_name)
+            return payload, meta
+
         else:
-            # Fallback / None: store raw data
+            # Fallback / Raw Bypass: store uncompressed payload
             meta = Metadata(file_name=file_name)
             return data, meta
+
+    def _decompress_payload(
+        self, strategy: str, payload: bytes, meta: Metadata, original_size: int
+    ) -> bytes:
+        """Decompress payload for a specific strategy."""
+        strat = strategy.upper()
+
+        if strat == "RLE":
+            return RLECompressor.decompress(payload)
+
+        elif strat == "HUFFMAN":
+            int_freqs = meta.get_int_frequencies()
+            return HuffmanCompressor.decompress(
+                payload, int_freqs, meta.padding_bits, original_size=original_size
+            )
+
+        elif strat == "HYBRID":
+            int_freqs = meta.get_int_frequencies()
+            return HybridCompressor.decompress(
+                payload, int_freqs, meta.padding_bits, intermediate_size=meta.intermediate_size
+            )
+
+        elif strat == "LZ77":
+            return LZ77Compressor.decompress(payload)
+
+        elif strat == "DEFLATE":
+            return DeflateCompressor.decompress(payload)
+
+        elif strat == "LZW":
+            return LZWCompressor.decompress(payload)
+
+        elif strat == "BWT":
+            return BWTCompressor.decompress(payload)
+
+        elif strat in ("NONE", "RAW"):
+            return payload
+
+        else:
+            raise ValueError(f"Unknown compression algorithm: {strategy}")
 
     def compress_adaptive(
         self,
         data: bytes,
         file_name: str = "",
-        selection_mode: str = "prediction",
+        objective: str = "balanced",
+        candidates: Optional[List[str]] = None,
+        selection_mode: Optional[str] = None,
     ) -> Tuple[bytes, str, PredictionResult, Dict[str, Any]]:
-        """Compress data adaptively, selecting either via prediction or actual evaluation.
+        """Compress data adaptively, evaluating candidates against the specified objective.
 
         Args:
             data: Input raw bytes.
             file_name: Source file name.
-            selection_mode: 'prediction' (heuristic-based) or 'evaluate_all' (benchmark-based).
+            objective: 'max_compression', 'balanced', or 'fast'.
+            candidates: Optional custom list of candidate algorithms to evaluate.
+            selection_mode: Backward-compatible mode: 'prediction' or 'evaluate_all'.
 
         Returns:
             Tuple of:
             - container_bytes: Packaged .ahdc archive bytes
             - selected_strategy: Algorithm chosen
             - prediction: PredictionResult object
-            - execution_details: Timing and size dictionary
+            - execution_details: Complete metrics and comparison matrix
         """
         start_time = time.perf_counter()
+        t_analysis_start = time.perf_counter()
         profile, prediction = self.analyze(data)
+        analysis_duration = time.perf_counter() - t_analysis_start
 
-        if selection_mode == "evaluate_all":
-            # Test RLE, Huffman, and Hybrid to select the optimal strategy
-            results = {}
-            for strat in ["RLE", "HUFFMAN", "HYBRID"]:
+        orig_size = len(data)
+
+        # Candidate algorithm list
+        if candidates:
+            candidate_list = candidates
+        elif selection_mode == "prediction":
+            # In prediction mode, prioritize the predicted candidate and fallbacks
+            rec = prediction.recommended_strategy
+            candidate_list = [rec] if rec != "NONE" else ["DEFLATE", "HUFFMAN"]
+        else:
+            candidate_list = self.SUPPORTED_ALGORITHMS
+
+        measured_candidates: Dict[str, Dict[str, Any]] = {}
+        comparison_matrix: List[Dict[str, Any]] = []
+
+        # Evaluate candidate algorithms
+        for strat in candidate_list:
+            try:
+                tracemalloc.start()
                 t0 = time.perf_counter()
                 payload, meta = self._compress_with_strategy(strat, data, file_name)
                 t_enc = time.perf_counter() - t0
-                results[strat] = {
+                _, peak_mem = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+
+                # Build temporary container to measure exact overhead
+                temp_container = Container.pack(strat, payload, data, meta)
+                final_stored_size = len(temp_container)
+                payload_size = len(payload)
+                overhead_size = final_stored_size - payload_size
+
+                # Measure decompression time and verify
+                t0_dec = time.perf_counter()
+                decomp_test = self._decompress_payload(strat, payload, meta, orig_size)
+                t_dec = time.perf_counter() - t0_dec
+                integrity_ok = (decomp_test == data)
+
+                ratio = round(orig_size / max(final_stored_size, 1), 3)
+                space_saved = round(((orig_size - final_stored_size) / max(orig_size, 1)) * 100, 2)
+                throughput = round(orig_size / max(t_enc, 1e-9), 1)
+
+                candidate_record = {
                     "payload": payload,
                     "meta": meta,
-                    "size": len(payload),
-                    "enc_time": t_enc,
+                    "container_bytes": temp_container,
+                    "payload_size": payload_size,
+                    "overhead_size": overhead_size,
+                    "final_stored_size": final_stored_size,
+                    "compression_ratio": ratio,
+                    "space_saving_pct": space_saved,
+                    "encoding_time": t_enc,
+                    "decoding_time": t_dec,
+                    "throughput_bps": throughput,
+                    "peak_memory_kb": round(peak_mem / 1024, 2),
+                    "integrity_passed": integrity_ok,
+                }
+                measured_candidates[strat] = candidate_record
+
+            except Exception as e:
+                # Algorithm failed on this input
+                try:
+                    tracemalloc.stop()
+                except Exception:
+                    pass
+                measured_candidates[strat] = {
+                    "payload": b"",
+                    "meta": Metadata(file_name=file_name),
+                    "container_bytes": b"",
+                    "payload_size": 0,
+                    "overhead_size": 0,
+                    "final_stored_size": float("inf"),
+                    "compression_ratio": 0.0,
+                    "space_saving_pct": -100.0,
+                    "encoding_time": 0.0,
+                    "decoding_time": 0.0,
+                    "throughput_bps": 0.0,
+                    "peak_memory_kb": 0.0,
+                    "integrity_passed": False,
+                    "error": str(e),
                 }
 
-            # If compression doesn't beat original size and prediction is NONE, allow NONE
-            min_size = min(res["size"] for res in results.values())
-            if min_size >= len(data) and prediction.recommended_strategy == "NONE":
-                selected_strategy = "NONE"
-                payload = data
-                meta = Metadata(file_name=file_name)
-            else:
-                # Rank according to cost function
-                # Normalize size and time
-                orig_sz = max(len(data), 1)
-                max_time = max(max(r["enc_time"] for r in results.values()), 1e-6)
+        # Select the best strategy according to the objective
+        selected_strategy, rationale = self.predictor.select_best(
+            measured_candidates, objective=objective, original_size=orig_size
+        )
 
-                best_cost = float("inf")
-                selected_strategy = "HUFFMAN"
-                for strat, res in results.items():
-                    norm_sz = res["size"] / orig_sz
-                    norm_tm = res["enc_time"] / max_time
-                    cost = (self.weights.weight_size * norm_sz) + (self.weights.weight_time * norm_tm)
-                    if cost < best_cost:
-                        best_cost = cost
-                        selected_strategy = strat
-
-                payload = results[selected_strategy]["payload"]
-                meta = results[selected_strategy]["meta"]
-
+        # Prepare final container and package
+        if selected_strategy in ("NONE", "RAW"):
+            selected_strategy = "NONE"
+            final_payload = data
+            final_meta = Metadata(file_name=file_name)
+            container_bytes = Container.pack("NONE", final_payload, data, final_meta)
+            final_stored_size = len(container_bytes)
+            final_enc_time = 0.0001
+            final_dec_time = 0.0001
+            final_peak_mem = 0.0
         else:
-            # Prediction-based selection
-            selected_strategy = prediction.recommended_strategy
-            if selected_strategy == "NONE":
-                # Data is incompressible; store as NONE (raw payload) to prevent bloat
-                payload = data
-                meta = Metadata(file_name=file_name)
-            else:
-                payload, meta = self._compress_with_strategy(selected_strategy, data, file_name)
+            win = measured_candidates[selected_strategy]
+            container_bytes = win["container_bytes"]
+            final_payload = win["payload"]
+            final_meta = win["meta"]
+            final_stored_size = win["final_stored_size"]
+            final_enc_time = win["encoding_time"]
+            final_dec_time = win["decoding_time"]
+            final_peak_mem = win["peak_memory_kb"]
 
-        # Pack into container
-        container_bytes = Container.pack(selected_strategy, payload, data, meta)
+        # Build comprehensive Comparison Matrix table
+        for strat in candidate_list:
+            cand = measured_candidates[strat]
+            is_selected = (strat == selected_strategy)
+            failed = cand.get("error") is not None
+
+            status_str = "Evaluated" if not failed else "Failed"
+            selection_str = "Selected" if is_selected else ("Not Selected" if not failed else "Failed")
+
+            comparison_matrix.append({
+                "Algorithm": strat,
+                "Evaluation Status": status_str,
+                "Original Size (B)": orig_size,
+                "Payload Size (B)": cand["payload_size"],
+                "Metadata & Header Size (B)": cand["overhead_size"],
+                "Final Stored Size (B)": cand["final_stored_size"] if not failed else orig_size,
+                "Compression Ratio": cand["compression_ratio"],
+                "Space Saved (%)": cand["space_saving_pct"],
+                "Compression Time (s)": round(cand["encoding_time"], 5),
+                "Decompression Time (s)": round(cand["decoding_time"], 5),
+                "Throughput (B/s)": cand["throughput_bps"],
+                "Peak Memory (KB)": cand["peak_memory_kb"],
+                "Integrity": "PASS" if cand["integrity_passed"] else "FAIL",
+                "Selection Result": selection_str,
+            })
+
+        # Add Raw Bypass to comparison table if selected or for completeness
+        raw_container = Container.pack("NONE", data, data, Metadata(file_name=file_name))
+        raw_size = len(raw_container)
+        comparison_matrix.append({
+            "Algorithm": "Raw Bypass",
+            "Evaluation Status": "Evaluated",
+            "Original Size (B)": orig_size,
+            "Payload Size (B)": orig_size,
+            "Metadata & Header Size (B)": raw_size - orig_size,
+            "Final Stored Size (B)": raw_size,
+            "Compression Ratio": round(orig_size / max(raw_size, 1), 3),
+            "Space Saved (%)": round(((orig_size - raw_size) / max(orig_size, 1)) * 100, 2),
+            "Compression Time (s)": 0.00001,
+            "Decompression Time (s)": 0.00001,
+            "Throughput (B/s)": round(orig_size / 0.00001, 1),
+            "Peak Memory (KB)": 0.0,
+            "Integrity": "PASS",
+            "Selection Result": "Selected" if selected_strategy == "NONE" else "Not Selected",
+        })
+
         total_time = time.perf_counter() - start_time
 
         details = {
             "selected_strategy": selected_strategy,
             "predicted_strategy": prediction.recommended_strategy,
-            "prediction_accurate": (
-                selected_strategy == prediction.recommended_strategy
-                or (selected_strategy in ("RLE", "HYBRID") and prediction.recommended_strategy in ("RLE", "HYBRID"))
-            ),
-            "original_size": len(data),
-            "payload_size": len(payload),
+            "selection_objective": objective,
+            "selection_rationale": rationale,
+            "original_size": orig_size,
+            "payload_size": len(final_payload),
             "container_size": len(container_bytes),
-            "compression_ratio": round(len(data) / len(container_bytes), 3) if len(container_bytes) > 0 else 0.0,
-            "space_saving_pct": round(((len(data) - len(container_bytes)) / max(len(data), 1)) * 100, 2),
-            "total_elapsed_time": round(total_time, 4),
+            "compression_ratio": round(orig_size / max(len(container_bytes), 1), 3),
+            "space_saving_pct": round(((orig_size - len(container_bytes)) / max(orig_size, 1)) * 100, 2),
+            "encoding_time": round(final_enc_time, 5),
+            "decoding_time": round(final_dec_time, 5),
+            "content_analysis_time": round(analysis_duration, 5),
+            "total_elapsed_time": round(total_time, 5),
+            "throughput_bps": round(orig_size / max(final_enc_time, 1e-9), 1),
+            "peak_memory_kb": final_peak_mem,
             "profile": profile,
+            "comparison_matrix": comparison_matrix,
         }
 
         return container_bytes, selected_strategy, prediction, details
@@ -195,7 +394,7 @@ class AdaptiveCompressor:
         Returns:
             Tuple of:
             - decompressed_bytes: Restored original bytes
-            - integrity_passed: Boolean indicating exact hash match
+            - integrity_passed: Boolean indicating exact hash and length match
             - message: Verification status message
             - metadata_info: Container attributes dictionary
         """
@@ -221,7 +420,19 @@ class AdaptiveCompressor:
                 payload, int_freqs, meta.padding_bits, intermediate_size=meta.intermediate_size
             )
 
-        elif strategy == "NONE":
+        elif strategy == "LZ77":
+            decompressed = LZ77Compressor.decompress(payload)
+
+        elif strategy == "DEFLATE":
+            decompressed = DeflateCompressor.decompress(payload)
+
+        elif strategy == "LZW":
+            decompressed = LZWCompressor.decompress(payload)
+
+        elif strategy == "BWT":
+            decompressed = BWTCompressor.decompress(payload)
+
+        elif strategy in ("NONE", "RAW"):
             decompressed = payload
 
         else:
@@ -231,12 +442,12 @@ class AdaptiveCompressor:
 
         # Verify integrity
         computed_sha256 = hashlib.sha256(decompressed).hexdigest()
-        integrity_passed = (computed_sha256.lower() == pkg.original_sha256.lower()) and (
-            len(decompressed) == pkg.original_size
-        )
+        hash_match = computed_sha256.lower() == pkg.original_sha256.lower()
+        len_match = len(decompressed) == pkg.original_size
+        integrity_passed = hash_match and len_match
 
         status_msg = (
-            f"Integrity Check: PASSED (SHA-256 match, {len(decompressed)} bytes verified)"
+            f"Integrity Check: PASSED (SHA-256 match, {len(decompressed):,} bytes restored exactly)"
             if integrity_passed
             else f"Integrity Check: FAILED (Hash mismatch! Expected {pkg.original_sha256[:12]}..., got {computed_sha256[:12]}...)"
         )
@@ -245,10 +456,11 @@ class AdaptiveCompressor:
             "algorithm": strategy,
             "original_size": pkg.original_size,
             "decompressed_size": len(decompressed),
-            "decoding_time": round(dec_time, 4),
+            "decoding_time": round(dec_time, 5),
             "expected_sha256": pkg.original_sha256,
             "computed_sha256": computed_sha256,
             "file_name": meta.file_name,
+            "integrity_passed": integrity_passed,
         }
 
         return decompressed, integrity_passed, status_msg, info

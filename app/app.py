@@ -19,6 +19,7 @@ import sys
 import time
 import textwrap
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -26,7 +27,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure project root is prioritized in sys.path for Streamlit Cloud and local runs
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 def render_html(html_str: str) -> None:
     """Render raw HTML safely by stripping indentation so Markdown does not parse 4+ spaces as a code block."""
@@ -37,9 +41,6 @@ from analysis.predictor import CompressionPredictor, CostWeights
 from analysis.repetition import analyze_repetition
 from analysis.statistics import calculate_statistics
 from compression.adaptive import AdaptiveCompressor
-from compression.huffman import HuffmanCompressor
-from compression.hybrid import HybridCompressor
-from compression.rle import RLECompressor
 from datasets.generate_datasets import DATASET_DIR, generate_all_datasets
 from evaluation.benchmark import BenchmarkRunner
 from evaluation.report_generator import generate_pdf_report
@@ -919,48 +920,73 @@ if current_page == "compress":
         </div>
         """, unsafe_allow_html=True)
 
+        # Objective Selection
+        st.markdown('<div class="section-title">Compression Objective</div>', unsafe_allow_html=True)
+        col_obj, _ = st.columns([3, 1])
+        with col_obj:
+            obj_choice = st.radio(
+                "Optimization Target:",
+                [
+                    "🎯 Balanced (Optimal trade-off: size, speed, memory)",
+                    "📦 Maximum Compression (Minimize final stored container size)",
+                    "⚡ Fast Compression (Maximize processing throughput)",
+                ],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+
+        if "Maximum" in obj_choice:
+            active_objective = "max_compression"
+        elif "Fast" in obj_choice:
+            active_objective = "fast"
+        else:
+            active_objective = "balanced"
+
         if st.button("Start Adaptive Compression", type="primary", use_container_width=True):
-            with st.status("Executing compression pipeline...", expanded=True) as status:
+            with st.status("Executing adaptive compression pipeline...", expanded=True) as status:
                 st.write("Ingesting byte stream and profiling character frequency distributions...")
-                time.sleep(0.04)
-                st.write("Evaluating Shannon entropy boundary conditions and repetition ratios...")
-                time.sleep(0.04)
+                time.sleep(0.02)
+                st.write(f"Evaluating candidate algorithms against '{active_objective}' objective...")
                 container_bytes, chosen_strat, pred_obj, details = adaptive_comp.compress_adaptive(
-                    input_bytes, file_name=input_name, selection_mode="prediction"
+                    input_bytes, file_name=input_name, objective=active_objective
                 )
-                st.write("Packaging into AHDC binary container with SHA-256 checksum...")
-                time.sleep(0.04)
+                st.write(f"Decision Engine: Selected {chosen_strat} ({details['selection_rationale'][:60]}...).")
+                time.sleep(0.02)
+                st.write("Packaging into AHDC binary container with embedded SHA-256 digest...")
                 decomp_bytes, integrity_ok, verify_msg, decomp_info = AdaptiveCompressor.decompress_container(
                     container_bytes
                 )
-                st.write("Lossless integrity verified against original file stream.")
+                st.write("Lossless integrity verified against original byte stream.")
                 status.update(label="Compression pipeline completed successfully.", state="complete", expanded=False)
 
             orig_sha = hashlib.sha256(input_bytes).hexdigest()
             decomp_sha = decomp_info["computed_sha256"]
-
-            runner = BenchmarkRunner()
-            comp_rows, _ = runner.run_single_dataset(input_name, input_bytes)
 
             st.session_state["active_job"] = {
                 "file_name": input_name,
                 "original_bytes": input_bytes,
                 "container_bytes": container_bytes,
                 "selected_strategy": chosen_strat,
+                "selection_objective": active_objective,
+                "selection_rationale": details["selection_rationale"],
                 "original_size": details["original_size"],
                 "compressed_size": details["container_size"],
                 "compression_ratio": details["compression_ratio"],
                 "space_saving_pct": details["space_saving_pct"],
-                "encoding_time": details["total_elapsed_time"],
-                "decoding_time": decomp_info["decoding_time"],
+                "encoding_time": details["encoding_time"],
+                "decoding_time": details["decoding_time"],
+                "content_analysis_time": details["content_analysis_time"],
+                "total_elapsed_time": details["total_elapsed_time"],
+                "throughput_bps": details["throughput_bps"],
+                "peak_memory_kb": details["peak_memory_kb"],
                 "profile": profile,
                 "prediction": prediction,
-                "explanation": prediction.explanation,
+                "explanation": details["selection_rationale"],
                 "integrity_verified": integrity_ok,
                 "sha256_original": orig_sha,
                 "sha256_decompressed": decomp_sha,
                 "decompressed_bytes": decomp_bytes,
-                "comparison_rows": comp_rows,
+                "comparison_matrix": details["comparison_matrix"],
             }
 
             add_history_entry(
@@ -970,7 +996,7 @@ if current_page == "compress":
                 compression_ratio=details["compression_ratio"],
                 space_saved_pct=details["space_saving_pct"],
                 algorithm=chosen_strat,
-                encoding_time_sec=details["total_elapsed_time"],
+                encoding_time_sec=details["encoding_time"],
                 decoding_time_sec=decomp_info["decoding_time"],
                 integrity_status="PASSED" if integrity_ok else "FAILED",
                 sha256_hash=orig_sha,
@@ -1051,6 +1077,19 @@ if current_page == "compress":
             </div>
             """)
 
+            # Selection Rationale Callout
+            if j.get("selection_rationale"):
+                st.markdown(f"""
+                <div style="background:#f0f9ff; border-left:4px solid #0284c7; border-radius:8px; padding:12px 18px; margin:14px 0;">
+                    <p style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#0369a1; margin:0 0 3px 0;">
+                        SELECTION RATIONALE ({j.get('selection_objective', 'balanced').upper()} OBJECTIVE)
+                    </p>
+                    <p style="font-size:0.83rem; color:#0c4a6e; margin:0; line-height:1.45;">
+                        {j['selection_rationale']}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
             # Lossless Integrity Verification
             if j["integrity_verified"]:
                 st.markdown(f"""
@@ -1066,27 +1105,48 @@ if current_page == "compress":
                 st.markdown("""<div class="integrity-fail">INTEGRITY CHECK FAILED — Checksum mismatch.</div>""", unsafe_allow_html=True)
 
             # Algorithm Comparison Table
-            if j.get("comparison_rows"):
-                st.markdown('<div class="section-title">Multi-Algorithm Comparison Matrix</div>', unsafe_allow_html=True)
-                best_size = min(r["Compressed Size (B)"] for r in j["comparison_rows"])
+            matrix_data = j.get("comparison_matrix") or j.get("comparison_rows")
+            if matrix_data:
+                st.markdown('<div class="section-title">Algorithm Comparison Matrix</div>', unsafe_allow_html=True)
                 rows_html = ""
-                for row in j["comparison_rows"]:
-                    is_best = row["Compressed Size (B)"] == best_size
-                    tr_cls = "best-row" if is_best else ""
-                    best_tag = "<span class='best-tag'>OPTIMAL</span>" if is_best else ""
-                    itg_cls = "pass-tag" if row["Integrity"] == "PASSED" else "fail-tag"
-                    sp = row["Space Saved (%)"]
-                    sp_str = f"{sp:.2f}%" if sp >= 0 else f"+{abs(sp):.2f}% (exp)"
+                for row in matrix_data:
+                    alg_name = row.get("Algorithm", "")
+                    is_selected = (row.get("Selection Result") == "Selected" or alg_name == j["selected_strategy"])
+                    tr_cls = "best-row" if is_selected else ""
+                    sel_tag = "<span class='best-tag'>SELECTED</span>" if is_selected else ""
+                    itg_str = row.get("Integrity", "PASS")
+                    itg_cls = "pass-tag" if itg_str in ("PASS", "PASSED") else "fail-tag"
+                    sp = row.get("Space Saved (%)", 0.0)
+                    sp_str = f"{sp:.1f}%" if sp >= 0 else f"+{abs(sp):.1f}% (exp)"
+                    thr = row.get("Throughput (B/s)", 0.0)
+                    thr_str = f"{thr/1e6:.1f} MB/s" if thr >= 1e6 else f"{thr/1e3:.1f} KB/s"
+                    mem_val = row.get("Peak Memory (KB)", 0.0)
+                    mem_str = f"{mem_val:.1f} KB" if mem_val > 0 else "-"
+                    status_str = row.get("Evaluation Status", "Evaluated")
+                    payload_val = row.get("Payload Size (B)")
+                    payload_str = f"{payload_val:,}" if payload_val is not None else "-"
+                    overhead_val = row.get("Metadata & Header Size (B)")
+                    overhead_str = f"{overhead_val:,}" if overhead_val is not None else "-"
+                    final_sz = row.get("Final Stored Size (B)") or row.get("Compressed Size (B)", 0)
+                    ratio_val = row.get("Compression Ratio") or row.get("Ratio", 1.0)
+                    enc_tm = row.get("Compression Time (s)") or row.get("Encoding Time (s)", 0.0)
+                    dec_tm = row.get("Decompression Time (s)") or row.get("Decoding Time (s)", 0.0)
+
                     rows_html += f"""
                     <tr class="{tr_cls}">
-                        <td>{row['Algorithm']}{best_tag}</td>
-                        <td>{row['Original Size (B)']:,}</td>
-                        <td>{row['Compressed Size (B)']:,}</td>
-                        <td>{row['Ratio']:.3f}x</td>
+                        <td><b>{alg_name}</b> {sel_tag}</td>
+                        <td>{status_str}</td>
+                        <td>{row.get('Original Size (B)', j['original_size']):,}</td>
+                        <td>{payload_str}</td>
+                        <td>{overhead_str}</td>
+                        <td><b>{final_sz:,}</b></td>
+                        <td><b>{ratio_val:.2f}x</b></td>
                         <td>{sp_str}</td>
-                        <td>{row['Encoding Time (s)']:.5f}s</td>
-                        <td>{row['Decoding Time (s)']:.5f}s</td>
-                        <td class="{itg_cls}">{row['Integrity']}</td>
+                        <td>{enc_tm:.4f}s</td>
+                        <td>{dec_tm:.4f}s</td>
+                        <td>{thr_str}</td>
+                        <td>{mem_str}</td>
+                        <td class="{itg_cls}">{itg_str}</td>
                     </tr>"""
 
                 st.markdown(f"""
@@ -1094,9 +1154,9 @@ if current_page == "compress":
                 <table class="styled-table">
                     <thead>
                         <tr>
-                            <th>Algorithm</th><th>Original</th><th>Compressed</th>
-                            <th>Ratio</th><th>Space Delta</th>
-                            <th>Enc Time</th><th>Dec Time</th><th>Integrity</th>
+                            <th>Algorithm</th><th>Status</th><th>Original</th><th>Payload</th>
+                            <th>Overhead</th><th>Final Size</th><th>Ratio</th><th>Space Saved</th>
+                            <th>Enc Time</th><th>Dec Time</th><th>Throughput</th><th>Peak Memory</th><th>Integrity</th>
                         </tr>
                     </thead>
                     <tbody>{rows_html}</tbody>
@@ -1128,11 +1188,13 @@ if current_page == "compress":
                     encoding_time_sec=j["encoding_time"],
                     decoding_time_sec=j["decoding_time"],
                     profile=j["profile"],
-                    explanation=j["explanation"],
+                    explanation=j.get("selection_rationale") or j.get("explanation", ""),
                     sha256_original=j["sha256_original"],
                     sha256_decompressed=j["sha256_decompressed"],
                     integrity_verified=j["integrity_verified"],
-                    comparison_rows=j.get("comparison_rows"),
+                    objective=j.get("selection_objective", "balanced"),
+                    comparison_rows=j.get("comparison_matrix") or j.get("comparison_rows"),
+                    total_processing_time=j.get("total_elapsed_time", 0.0),
                 )
                 st.download_button(
                     "Download Technical Report (PDF)",

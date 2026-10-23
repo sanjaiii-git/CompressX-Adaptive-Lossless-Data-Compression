@@ -69,8 +69,9 @@ import pandas as pd
 import streamlit as st
 
 def render_html(html_str: str) -> None:
-    """Render raw HTML safely by stripping indentation so Markdown does not parse 4+ spaces as a code block."""
-    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
+    """Render raw HTML safely by stripping line indentation so Markdown never parses 4+ spaces as a code block."""
+    lines = [line.strip() for line in html_str.strip().splitlines() if line.strip()]
+    st.markdown("\n".join(lines), unsafe_allow_html=True)
 
 try:
     from analysis.entropy import calculate_entropy, theoretical_compression_limit
@@ -1215,7 +1216,7 @@ if current_page == "compress":
 
             # Selection Rationale Callout
             if j.get("selection_rationale"):
-                st.markdown(f"""
+                render_html(f"""
                 <div style="background:#f0f9ff; border-left:4px solid #0284c7; border-radius:8px; padding:12px 18px; margin:14px 0;">
                     <p style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#0369a1; margin:0 0 3px 0;">
                         SELECTION RATIONALE ({j.get('selection_objective', 'balanced').upper()} OBJECTIVE)
@@ -1224,11 +1225,11 @@ if current_page == "compress":
                         {j['selection_rationale']}
                     </p>
                 </div>
-                """, unsafe_allow_html=True)
+                """)
 
             # Lossless Integrity Verification
             if j["integrity_verified"]:
-                st.markdown(f"""
+                render_html(f"""
                 <div class="integrity-pass">
                     <div>LOSSLESS INTEGRITY VERIFIED — PASSED</div>
                     <div style="font-weight:400; font-size:0.76rem; color:#15803d; margin-top:2px;">
@@ -1236,9 +1237,9 @@ if current_page == "compress":
                     </div>
                 </div>
                 <div class="hash-code">SHA-256: {j['sha256_original']}</div>
-                """, unsafe_allow_html=True)
+                """)
             else:
-                st.markdown("""<div class="integrity-fail">INTEGRITY CHECK FAILED — Checksum mismatch.</div>""", unsafe_allow_html=True)
+                render_html("""<div class="integrity-fail">INTEGRITY CHECK FAILED — Checksum mismatch.</div>""")
 
             # Algorithm Comparison Table
             matrix_data = j.get("comparison_matrix") or j.get("comparison_rows")
@@ -1285,7 +1286,7 @@ if current_page == "compress":
                         <td class="{itg_cls}">{itg_str}</td>
                     </tr>"""
 
-                st.markdown(f"""
+                render_html(f"""
                 <div style="overflow-x:auto;">
                 <table class="styled-table">
                     <thead>
@@ -1298,7 +1299,7 @@ if current_page == "compress":
                     <tbody>{rows_html}</tbody>
                 </table>
                 </div>
-                """, unsafe_allow_html=True)
+                """)
 
             # Download Center (Professional text, no emojis)
             st.markdown('<div class="section-title">Export & Artifact Downloads</div>', unsafe_allow_html=True)
